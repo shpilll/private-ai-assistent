@@ -1,0 +1,50 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment: &database
+      POSTGRES_DB: ${POSTGRES_DB:-assistant}
+      POSTGRES_USER: ${POSTGRES_USER:-assistant}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-development}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  api:
+    image: ai-ass-api:latest
+    build:
+      context: ./backend
+      additional_contexts:
+        frontend: ./frontend
+    environment: &app_env
+      <<: *database
+      POSTGRES_HOST: db
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_EMBEDDING_MODEL: ${OPENROUTER_EMBEDDING_MODEL:-nvidia/nemotron-3-embed-1b:free}
+      OPENROUTER_CHAT_MODEL: ${OPENROUTER_CHAT_MODEL:-openrouter/free}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+    command: ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://localhost:8000/health/ready', timeout=3).close()"]
+      interval: 5s
+      timeout: 4s
+      retries: 12
+
+  indexer:
+    image: ai-ass-api:latest
+    pull_policy: never
+    environment: *app_env
+    command: ["python", "-m", "app.rag.worker"]
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
