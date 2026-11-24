@@ -111,6 +111,17 @@ class RagTests(unittest.TestCase):
         self.index_next("notes")
         self.assertEqual(self.store.status("notes", row.id, self.profile)["state"], "ready")
 
+    def test_late_failure_cannot_erase_a_successful_index(self):
+        note = Records(self.session, Note).create({"title": "Delivery", "body": "Wednesday"})
+        slow_job = self.store.candidate("notes", self.profile)
+        self.index_next("notes")
+        self.ai.fail = True
+        index_source(self.store, slow_job, self.ai)
+        self.assertEqual(self.store.status("notes", note.id, self.profile)["state"], "ready")
+        self.ai.fail = False
+        hits = retrieve(self.store, self.ai, SearchQuery(question="Delivery"))
+        self.assertEqual([hit["text"] for hit in hits], ["Wednesday"])
+
 
 class DocumentHTTPTests(unittest.TestCase):
     base = "http://127.0.0.1:8000/api"

@@ -1,6 +1,7 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from sqlalchemy.orm import Session
 
@@ -59,9 +60,9 @@ def list_documents(offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le
     return repo.list(offset, limit)
 
 
-@router.get("/documents/{source_id}/content", tags=["documents"])
+@router.get("/documents/{source_id}/content", tags=["documents"], response_class=PlainTextResponse)
 def content(source_id: LinkId, repo: Records = Depends(documents)):
-    return Response(repo.get(source_id).body, media_type="text/plain; charset=utf-8")
+    return repo.get(source_id).body
 
 
 @router.put("/documents/{source_id}", tags=["documents"], response_model=DocumentInfo)

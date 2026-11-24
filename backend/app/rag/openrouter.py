@@ -104,7 +104,9 @@ class OpenRouterProvider:
             )
         except APIError as exc:
             raise ProviderError(f"OpenRouter chat: {type(exc).__name__}") from exc
-        content = result.choices[0].message.content if result.choices else None
+        if not result.choices or result.choices[0].finish_reason != "stop":
+            raise ProviderError("OpenRouter did not finish the answer")
+        content = result.choices[0].message.content
         if not content or not content.strip():
             raise ProviderError("OpenRouter returned an empty answer")
         return content

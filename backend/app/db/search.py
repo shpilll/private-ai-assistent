@@ -37,6 +37,9 @@ class IndexStore:
             row = db.get(model, source.id, with_for_update=True)
             if row is None or row.revision != source.revision:
                 return False
+            # Two workers can pick the same revision before either one finishes.
+            if row.index_state == "ready" and row.profile == profile:
+                return False
             db.execute(delete(Chunk).where(link == source.id))
             if chunks:
                 db.execute(insert(Chunk), [{link.key: source.id, **part} for part in chunks])

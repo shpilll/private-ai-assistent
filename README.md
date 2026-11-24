@@ -1,126 +1,134 @@
 # Personal AI Assistant
 
-Локальный персональный ассистент для одного владельца. Через FastAPI можно вести проекты, цели, задачи, заметки и категории. Данные хранятся в PostgreSQL 16. API доступен на этом компьютере без регистрации.
+A single-user workspace for turning personal notes into answers and tasks. Upload a text file, ask a question about it, and follow the answer back to the passage it came from. The chat can also create tasks, update goals, and save new notes in the same PostgreSQL database.
 
-## Запуск
+**Stack:** Python 3.12, FastAPI, SQLAlchemy, Alembic, PostgreSQL 16 with pgvector, React, TypeScript, and Docker Compose. The web interface is in Russian. You can ask questions in English.
 
-Из корня проекта при работающем Docker Desktop в режиме Linux-контейнеров выполните:
+![The knowledge base editor showing a garden note and its search index status](frontend/knowledge-preview.jpg)
 
-```powershell
+## Run locally
+
+From the repository root, with Docker Compose v2 and Linux containers available, run:
+
+```sh
 docker compose up --build -d --wait
 ```
 
-Откройте [Swagger UI](http://127.0.0.1:8000/docs). Compose публикует API на loopback, а база доступна по имени `db` внутри сети Compose. Данные сохраняются в именованном томе `postgres_data`. При старте API ждёт готовности PostgreSQL, применяет миграции и запускает Uvicorn.
+Open the [web app](http://127.0.0.1:8000/), the [knowledge base](http://127.0.0.1:8000/#knowledge/notes), or the [interactive API reference](http://127.0.0.1:8000/docs). Compose serves the built frontend and the API on the same loopback address. PostgreSQL runs on the internal Compose network. On startup the API applies the migrations, including the pgvector extension.
 
-Значения для первого запуска заданы в Compose. Чтобы выбрать другой порт API или параметры новой базы, скопируйте `.env.example` в `.env` и измените значения перед запуском. PostgreSQL использует параметры создания пользователя и базы при первой инициализации тома.
+**Without an API key**, you can create and link records, upload documents, and run the integration suite. **With an OpenRouter key**, you can index documents, search by meaning, generate answers with sources, and use tools in chat. This is a local application for one trusted user. Its HTTP endpoints do not require authentication.
 
-## Чат
+### Try it with a sample document
 
-Откройте [Контекст](http://127.0.0.1:8000/) в браузере. Введите сообщение или выберите подсказку. Enter отправляет сообщение, Shift + Enter добавляет строку. В боковой панели можно начать новый диалог и вернуться к предыдущему. После обновления страницы открывается последний выбранный диалог.
+1. Open [Documents](http://127.0.0.1:8000/#knowledge/documents), choose **Загрузить документ** (Upload document), and upload [garden-notes.txt](examples/garden-notes.txt). Open the saved document to read it. On a fresh install its index status is **В очереди** (pending).
+2. To enable AI features, copy [.env.example](.env.example) to `.env` if you have not already created one. Set `OPENROUTER_API_KEY` there and rerun the startup command. **The indexer sends existing and newly added notes and document text to OpenRouter for embedding.** Questions and selected passages are also sent to the provider when generating an answer.
+3. Once the document shows **Доступно для поиска** (ready), open `POST /api/rag/ask` in Swagger UI and send the request below. The sample says the orchard team waters the trees **every Wednesday morning**. Inspect `sources[0].text` and open `sources[0].url` to check the answer against the uploaded file. The generated wording can vary.
 
-Ответ появляется по мере генерации. Под ответом поиска доступны найденные фрагменты и ссылки на исходные записи. Запрос удаления показывает название задачи и отдельные кнопки подтверждения и отмены. Для работы требуется настроенный провайдер с поддержкой streaming и tool calling.
-
-PostgreSQL хранит завершённые обращения, результаты инструментов и ссылки. Модель получает до восьми последних обращений текущего диалога с ограничением длины текста. История отделена от векторного индекса. Изменения инструментов и завершённый ответ фиксируются в одной транзакции. Если передача оборвалась, повтор того же запроса с тем же `request_id` возвращает уже сохранённый результат или выполняет запрос после отката.
-
-`POST /api/chats` создаёт диалог, `GET /api/chats` возвращает список, `GET /api/chats/{id}` открывает историю. `POST /api/chats/{id}/messages` принимает `message` и UUID `request_id`, затем передаёт события `delta`, `tool`, `done` или `error` в формате NDJSON.
-
-## Работа с базой знаний
-
-Откройте [Базу знаний](http://127.0.0.1:8000/#knowledge/notes) по ссылке в шапке чата. Разделы доступны в боковой панели, а на узком экране — в выпадающем списке. Для редактирования выберите запись по названию. Задачи можно связать с целью, проектом и категорией, изменить срок, приоритет и статус. Удаление требует подтверждения.
-
-В разделе «Документы» можно загрузить UTF-8 файл `.txt` до 1 МиБ, открыть текст и сменить категорию. Кнопка «Заменить файл» обновляет содержимое под тем же ID. В карточках документов и заметок видны состояние поискового индекса, причина ошибки и кнопка переиндексации. Открытая карточка автоматически обновляет статус, пока запись находится в очереди и настроен провайдер.
-
-В Swagger UI откройте группу ресурса и нажмите **Try it out**. Для каждого ресурса доступны создание и список (`POST` и `GET /api/{resource}`), просмотр, частичное изменение и удаление по ID (`GET`, `PATCH`, `DELETE /api/{resource}/{id}`). Список упорядочен по ID и принимает `offset` и `limit` (по умолчанию 50, максимум 200).
-
-| Ресурс | Поля |
-| --- | --- |
-| `categories` | Название |
-| `projects` | Название, описание, категория |
-| `goals` | Название, описание, категория, целевая дата |
-| `tasks` | Название, описание, категория, проект, цель, срок, статус и приоритет |
-| `notes` | Название, текст, категория, проект |
-
-Например, отправьте в `POST /api/tasks` тело `{"title":"Разобрать заметки","priority":"high"}`. Задача получит статус `todo`. По возвращённому ID отправьте `{"status":"done"}` в `PATCH /api/tasks/{id}`. Для промежуточного состояния используйте `in_progress`.
-
-Связи задаются полями `project_id`, `goal_id` и `category_id`. Чтобы снять связь или очистить дату, передайте `null` в PATCH. При удалении проекта, категории или цели PostgreSQL снимает соответствующие связи и сохраняет связанные записи. Несуществующий ID в ссылке даёт HTTP 422, обращение к отсутствующей записи по её собственному ID — HTTP 404.
-
-## Поиск по заметкам и документам
-
-В Swagger UI загрузите текстовый файл через `POST /api/documents`. Поддерживается UTF-8 (включая BOM), до 1 МиБ. Содержимое хранится в PostgreSQL. `PUT /api/documents/{id}` заменяет файл, а `GET /api/documents/{id}/content` открывает его текст. Заметки индексируются из поля `body`.
-
-Для семантического поиска задайте `OPENROUTER_API_KEY` в локальном `.env` и выполните `docker compose up --build -d --wait`. При добавлении ключа обработчик автоматически отправит тексты накопленных заметок и документов в OpenRouter для получения embeddings. При ответе модель получает вопрос и выбранные фрагменты с заголовками. Переменные `OPENROUTER_EMBEDDING_MODEL` и `OPENROUTER_CHAT_MODEL` задают модели отдельно. По умолчанию ответы генерирует бесплатный маршрутизатор `openrouter/free`, а поиск использует `nvidia/nemotron-3.5-embed-1b:free`. Для существующей колонки pgvector адаптер берёт первые 1536 координат вектора Nemotron. Для другой модели выберите нативную размерность 1536. [Документация OpenRouter по embeddings](https://openrouter.ai/docs/api/reference/embeddings).
-
-1. Проверьте `GET /api/index/notes/{id}` или `GET /api/index/documents/{id}`. Статус `pending` означает ожидание или обработку. После успешной записи фрагментов появится `ready`. Без ключа запись остаётся в ожидании, а поиск и генерация возвращают HTTP 503.
-2. Отправьте `{"question":"Что я решил по переезду?","limit":3}` в `POST /api/rag/search` для поиска или в `POST /api/rag/ask` для ответа с источниками. Можно указать `category_id` и `kind` (`notes` или `documents`). Каждый результат содержит текст, смещение в символах, ссылку и косинусное расстояние. Чем оно меньше, тем ближе фрагмент к запросу.
-3. После изменения текста поиск сразу исключает прежнюю версию. Отдельный процесс `indexer` делит текст на перекрывающиеся фрагменты, получает embeddings пакетами и в одной транзакции заменяет старые векторы. Ревизия защищает от публикации устаревшего результата. Удаление источника удаляет его фрагменты. Смена модели или версии алгоритма запускает переиндексацию.
-4. Если обработка завершилась со статусом `failed`, поле `error` содержит причину. После устранения ошибки выполните `POST /api/index/{kind}/{id}`. Эта команда также позволяет вручную перестроить готовый индекс.
-
-Ответы и векторизация подключаются независимо через интерфейсы `Generator` и `Embeddings`. Выбор адаптеров сосредоточен в `backend/app/rag/wiring.py`. Например, для локальной Qwen через Ollama достаточно подключить там реализацию `Generator`. Поиск продолжит использовать текущие embeddings. Переиндексация нужна при смене поставщика векторов или embedding-модели.
-
-## Агент и инструменты
-
-В Swagger UI откройте `POST /api/agent/run` и попробуйте `{"message":"Создай задачу Купить чай с высоким приоритетом"}`. Ответ содержит текст ассистента, фактические вызовы в `tools` и список ожидающих решений в `confirmations`. Каждый запрос представляет отдельное обращение. Используйте ID из результата, например «Отметь задачу 7 выполненной».
-
-Доступны `search_knowledge`, `create_task`, `update_task`, `get_tasks`, `delete_task`, `create_goal`, `update_goal`, `get_projects` и `save_note`. Модель предлагает имя и параметры. Backend валидирует их и вызывает репозитории или поиск. Изменения одного обращения фиксируются после итогового ответа модели. Для вызова инструментов используется отдельный интерфейс `ToolCaller`.
-
-При запросе удаления найдите в `confirmations` ID подтверждения, ID и название задачи. Отправьте `{"confirm":true}` в `POST /api/agent/confirmations/{action_id}` для удаления или `{"confirm":false}` для отмены. Подтверждение действует 10 минут и привязано к версии задачи. После изменения задачи запросите удаление заново. [Формат вызовов инструментов OpenRouter](https://openrouter.ai/docs/guides/features/tool-calling).
-
-## Проверка
-
-| Маршрут | Что проверяет |
-| --- | --- |
-| `GET /health/live` | Процесс API обрабатывает HTTP-запросы |
-| `GET /health/ready` | API подключается к базе приложения и находит установленное расширение vector. При недоступности базы или отсутствии расширения возвращает HTTP 503 |
-
-Интеграционные тесты обращаются к запущенному API и сверяют ревизию базы с текущей миграцией:
-
-```powershell
-docker compose exec api python -m unittest discover -s tests -v
-docker compose exec api alembic current
+```json
+{
+  "question": "When does the orchard team water the apple trees?",
+  "kind": "documents",
+  "limit": 1
+}
 ```
 
-Просмотр журналов и остановка с сохранением тома:
+To try an action, open [Chat](http://127.0.0.1:8000/) and send *Create a high-priority task called Water the apple trees*. Look for it in [Tasks](http://127.0.0.1:8000/#knowledge/tasks). Asking the agent to delete a task opens a separate confirmation showing its title.
 
-```powershell
-docker compose logs api db
-docker compose down
-```
+Press Enter to send a message or Shift + Enter to add a line. The sidebar keeps previous conversations, and reloading the page restores the last one you selected.
 
-## Устройство backend
+<details>
+<summary>Chat screenshot</summary>
 
-```text
-backend/
-  app/main.py        создание FastAPI, жизненный цикл соединений, HTTP-диагностика
-  app/db/            подключение SQLAlchemy, ORM-модели, репозиторий и диагностика
-  app/knowledge/     HTTP-маршруты базы знаний и схемы валидации
-  app/chat/          диалоги и потоковые ответы
-  app/agent/         инструменты и управление вызовами
-  app/rag/           адаптер OpenRouter, обработчик фрагментов, retrieval и ответы
-  migrations/        окружение Alembic и версии схемы
-  tests/             интеграционные проверки запущенного приложения
-  pyproject.toml     пакет Python и зависимости
-frontend/            React и TypeScript, сборка Vite
-compose.yaml         API с интерфейсом, индексатор и PostgreSQL
-```
+![A chat in Russian recalling the project name from the previous turn](frontend/chat-preview.jpg)
 
-Для коротких диагностических запросов используются синхронные обработчики FastAPI и пул соединений SQLAlchemy. Код приложения и миграции получают параметры подключения из одних и тех же переменных окружения. Первая миграция устанавливает расширение vector в базу приложения.
+</details>
 
-## Направление разработки
-
-Шесть этапов MVP реализованы. Выбор провайдера генерации и embeddings остаётся независимым, что позволяет в дальнейшем добавить локальную модель.
+## How it works
 
 ```mermaid
 flowchart LR
     UI[React] --> API[FastAPI]
-    API --> KB[Knowledge Base]
-    API --> Chat[Chat]
-    Chat --> Agent[AI Agent]
+    API --> KB[Knowledge base]
+    API --> Chat[Streaming chat]
+    Chat --> Agent[Tool calls]
     Agent --> KB
-    Agent --> RAG[RAG Engine]
+    API --> RAG[Retrieval and answers]
+    Agent --> RAG
     KB --> DB[(PostgreSQL + pgvector)]
+    Chat --> DB
     RAG --> DB
-    Worker[Индексация] --> DB
-    Worker --> Emb[Embeddings API]
+    Worker[Indexing worker] --> DB
+    Worker --> Emb[Embedding provider]
     RAG --> Emb
-    Agent --> LLM[LLM API]
+    RAG --> LLM[Chat model]
+    Agent --> LLM
 ```
+
+| Design decision | Behavior to look for |
+| --- | --- |
+| Revision-aware indexing | Editing a note or replacing a file immediately excludes its old passages from search. The worker embeds overlapping chunks in batches, then checks the source revision before replacing its vectors in one transaction. Each hit carries a character offset and source URL. |
+| Transactional chat turns | The backend locks the conversation and commits tool mutations with the completed reply. A client that loses the stream can retry the same message with the same `request_id`. It receives the committed turn or retries after rollback. |
+| Confirmed deletion | The model can propose deleting a task. The user confirms through a separate endpoint. The confirmation expires after ten minutes and checks the task version, so an edit invalidates the original proposal. |
+| Separate provider interfaces | Embeddings, answer generation, and tool calling have separate Python protocols. A different chat adapter can reuse the existing embeddings. The index profile includes the embedding provider, model, dimensions, and chunking version. |
+
+The worker splits text into chunks of up to 1,200 characters with a 160-character overlap. Search ranks eligible passages by cosine distance and can filter by category or source type. Chat history lives outside the vector index. The model receives at most eight previous turns, with text length limits.
+
+## API guide
+
+The [Swagger UI](http://127.0.0.1:8000/docs) includes request schemas and lets you run each endpoint locally.
+
+| Workflow | Endpoints and examples |
+| --- | --- |
+| Manage records | `/api/categories`, `/api/projects`, `/api/goals`, `/api/tasks`, `/api/notes`. Use `POST` to create and `GET` to list. Append `/{id}` to read, patch, or delete one record. Lists use `offset` and `limit` (default 50, maximum 200). |
+| Link a task | Set `project_id`, `goal_id`, or `category_id`. Send `null` in a patch to clear a link or date. Deleting a linked project, goal, or category preserves the task. |
+| Store a document | `POST /api/documents` accepts a UTF-8 `.txt` file up to 1 MiB, including UTF-8 with BOM. `PUT /api/documents/{id}` replaces the file under the same ID. `GET /api/documents/{id}/content` returns the original text. |
+| Inspect the index | `GET /api/index/{kind}/{id}` reports `pending`, `ready`, or `failed` for `notes` or `documents`. On failure, inspect `error`, fix the cause, and `POST` to the same URL to requeue. With no key, records stay pending. |
+| Search and answer | `POST /api/rag/search` returns matching passages. `POST /api/rag/ask` returns an answer and sources. Both accept `question`, `limit`, and optional `kind` and `category_id`. |
+| Stream chat | `POST /api/chats` creates a conversation. List conversations with `GET /api/chats` or read one at `GET /api/chats/{id}`. Send a `message` and UUID `request_id` to `POST /api/chats/{id}/messages`. Each NDJSON line contains a `delta`, `tool`, `done`, or `error` event. |
+| Run one agent turn | `POST /api/agent/run` accepts `{"message":"Show my tasks"}` and returns the reply, tool calls, and pending confirmations. Send `{"confirm":true}` or `{"confirm":false}` to `POST /api/agent/confirmations/{action_id}` to resolve a deletion request. |
+
+For example, send `{"title":"Water the apple trees","priority":"high"}` to `POST /api/tasks`. The task starts in `todo`. Send `{"status":"done"}` to `PATCH /api/tasks/{id}` using the returned ID. The intermediate status is `in_progress`.
+
+## Configuration and data
+
+| Setting | Purpose |
+| --- | --- |
+| `API_PORT` | Host port for the web app and API, default `8000`. |
+| `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | Initial database settings. PostgreSQL applies them when it creates a new data volume. |
+| `OPENROUTER_API_KEY` | Enables the AI provider for both the API and the indexing worker. |
+| `OPENROUTER_CHAT_MODEL` | Defaults to `openrouter/free`. Chat needs streaming and tool calling support. |
+| `OPENROUTER_EMBEDDING_MODEL` | Defaults to `nvidia/nemotron-3.5-embed-1b:free`. The adapter takes the first 1,536 components of its 2,048-dimensional output. Other models must return 1,536 dimensions for the current schema. |
+
+Run `docker compose logs api indexer db` to inspect the services. Stop them with `docker compose down`. Documents, vectors, and chat history persist in the project's `postgres_data` named volume.
+
+## Tests
+
+The [CI workflow](.github/workflows/ci.yml) builds the TypeScript frontend and Python service, starts PostgreSQL from an empty volume on the runner, applies migrations, and runs the integration suite against the running app. The tests exercise real database constraints and pgvector ordering. Scripted models, deterministic vectors, and mocked provider HTTP responses keep the suite independent of model availability and paid API calls.
+
+For an end-to-end example, see `test_chat_search_links_back_to_uploaded_text` in [the agent tests](backend/tests/test_agent.py). It uploads a document, indexes it, streams a chat turn that calls search, and follows the returned source URL back to the original text. The test also checks what the model received and what the user sees when reopening the conversation.
+
+To reproduce CI locally alongside your personal instance, run these commands from the project root in a fresh shell. The example configuration supplies an empty provider key. The distinct Compose project has its own database volume.
+
+In PowerShell, set `$env:API_PORT = '0'` for this shell or, in Bash, run `export API_PORT=0`. Docker then assigns an available loopback port. The suite runs inside the API container and uses its internal port.
+
+```sh
+docker compose --env-file .env.example -p assistant-test up --build -d --wait
+docker compose --env-file .env.example -p assistant-test exec -T api python -m unittest discover -s tests -v
+docker compose --env-file .env.example -p assistant-test down
+```
+
+The liveness endpoint at `GET /health/live` checks that the API can handle requests. Readiness at `GET /health/ready` additionally verifies database access and the vector extension. Inspect the active migration with `docker compose exec api alembic current`.
+
+## Code map
+
+| Location | Responsibility |
+| --- | --- |
+| [backend/app/knowledge](backend/app/knowledge) | Resource routes and Pydantic schemas |
+| [backend/app/db](backend/app/db) | ORM models, repositories, vector search, and confirmation state |
+| [backend/app/rag](backend/app/rag) | Chunking, indexing worker, retrieval, and provider implementations |
+| [backend/app/rag/wiring.py](backend/app/rag/wiring.py) | Adapter selection for embeddings, generation, and tool calling |
+| [backend/app/agent](backend/app/agent) | Validated tool registry and agent execution loop |
+| [backend/app/chat](backend/app/chat) | Streaming conversations and request replay |
+| [backend/migrations](backend/migrations) | Alembic schema revisions |
+| [backend/tests](backend/tests) | HTTP integration tests, database tests, and provider adapter tests |
+| [frontend/src](frontend/src) | React chat and knowledge base UI |

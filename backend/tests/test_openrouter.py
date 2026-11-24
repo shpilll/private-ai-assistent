@@ -50,10 +50,19 @@ class OpenRouterTests(unittest.TestCase):
             self.assertEqual(payload["model"], "openrouter/free")
             context = json.loads(payload["messages"][1]["content"])
             self.assertEqual(context["passages"], [{"number": 1, "text": "text"}])
-            return httpx.Response(200, json={"choices": [{"message": {"role": "assistant", "content": "ok [1]"}}]})
+            return httpx.Response(200, json={"choices": [
+                {"finish_reason": "stop", "message": {"role": "assistant", "content": "ok [1]"}}
+            ]})
 
         self.transport(handler)
         self.assertEqual(self.ai.answer("question", ["text"]), "ok [1]")
+
+    def test_truncated_answer_is_not_returned_as_complete(self):
+        self.transport(lambda request: httpx.Response(200, json={"choices": [
+            {"finish_reason": "length", "message": {"role": "assistant", "content": "Only half an answer"}}
+        ]}))
+        with self.assertRaisesRegex(ProviderError, "did not finish"):
+            self.ai.answer("question", ["text"])
 
     def test_repeated_stream_role_can_be_sent_back_after_tool_call(self):
         def handler(request):

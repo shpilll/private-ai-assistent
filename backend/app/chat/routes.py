@@ -71,8 +71,17 @@ def stream_turn(engine, ai, chat_id, data):
         yield line("error", "Не удалось завершить сообщение.")
 
 
-@router.post("/{chat_id}/messages")
+@router.post(
+    "/{chat_id}/messages",
+    response_class=StreamingResponse,
+    responses={200: {
+        "description": "One JSON event per line. The stream ends with done or error.",
+        "content": {"application/x-ndjson": {"schema": {"type": "string"}}},
+    }},
+)
 def message(chat_id: UUID, data: ChatRequest, request: Request):
+    """Stream text deltas and tool names. Retry with the same message and request ID
+    to recover a committed turn without running its tools twice."""
     events = stream_turn(request.app.state.engine, request.app.state.ai, chat_id, data)
     return StreamingResponse(events, media_type="application/x-ndjson",
                              headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})

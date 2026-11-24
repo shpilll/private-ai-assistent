@@ -7,8 +7,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy.schema import CreateSchema, DropSchema
 
 from app.db.database import Base, make_engine
+from app.db.search import IndexStore
 from app.main import app
+from app.rag.chunks import index_profile
 from app.rag.providers import ProviderError
+from app.rag.service import index_source
 
 
 def calls(*items):
@@ -141,3 +144,35 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(send("ошибка", str(uuid4()))[-1]["type"], "error")
         self.assertEqual(self.client.get("/api/goals").json(), before)
         self.assertEqual(len(self.client.get(path).json()["turns"]), 2)
+
+    def test_chat_search_links_back_to_uploaded_text(self):
+        body = "The orchard team waters the apple trees every Wednesday morning."
+        response = self.client.post("/api/documents", files={"file": ("garden.txt", body, "text/plain")})
+        self.assertEqual(response.status_code, 201)
+        document_id = response.json()["id"]
+        self.addCleanup(self.client.delete, f"/api/documents/{document_id}")
+
+        store = IndexStore(self.engine)
+        embeddings = app.state.ai.embeddings
+        source = store.candidate("documents", index_profile(embeddings))
+        self.assertEqual(source.id, document_id)
+        index_source(store, source, embeddings)
+
+        question = "When are the apple trees watered?"
+        self.model.steps = [
+            calls(("search_knowledge", {"question": question, "kind": "documents"})),
+            {"content": "Every Wednesday morning."},
+        ]
+        chat_id = self.client.post("/api/chats").json()["id"]
+        chat_path = f"/api/chats/{chat_id}"
+        reply = self.client.post(chat_path + "/messages", json={"message": question, "request_id": str(uuid4())})
+        events = [json.loads(line) for line in reply.iter_lines()]
+        self.assertEqual(events[-1]["type"], "done")
+        turn = events[-1]["data"]
+        self.assertEqual(turn["answer"], "Every Wednesday morning.")
+        hit, = turn["tools"][0]["result"]
+        self.assertEqual(hit["source_id"], document_id)
+        self.assertEqual(hit["text"], body)
+        self.assertEqual(self.client.get(hit["url"]).text, body)
+        self.assertIn(body, self.model.last_messages[-1]["content"])
+        self.assertEqual(self.client.get(chat_path).json()["turns"], [turn])

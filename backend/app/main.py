@@ -31,7 +31,16 @@ async def lifespan(app: FastAPI):
         engine.dispose()
 
 
-app = FastAPI(title="Personal AI Assistant", lifespan=lifespan)
+app = FastAPI(
+    title="Personal AI Assistant",
+    description=(
+        "Manage a personal knowledge base, search notes and documents by meaning, "
+        "and stream conversations with a tool-calling assistant. "
+        "Knowledge base CRUD and document uploads work without an AI provider."
+    ),
+    version="0.1.0",
+    lifespan=lifespan,
+)
 app.include_router(router)
 app.include_router(rag_router)
 app.include_router(agent_router)
@@ -53,12 +62,12 @@ async def invalid_reference(request: Request, exc: InvalidReference):
     return JSONResponse({"detail": "Linked record does not exist"}, status_code=422)
 
 
-@app.get("/health/live")
+@app.get("/health/live", tags=["health"])
 def live() -> dict[str, str]:
     return {"status": "alive"}
 
 
-@app.get("/health/ready")
+@app.get("/health/ready", tags=["health"], responses={503: {"description": "Database or vector extension unavailable"}})
 def ready(request: Request) -> dict[str, str]:
     try:
         with request.app.state.engine.connect() as connection:
