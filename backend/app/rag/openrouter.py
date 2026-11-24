@@ -6,7 +6,7 @@ from openai import APIError, OpenAI
 
 from app.rag.providers import InputType, ProviderError
 
-DEFAULT_EMBEDDER = "nvidia/nemotron-3-embed-1b:free"
+DEFAULT_EMBEDDER = "nvidia/nemotron-3.5-embed-1b:free"
 DIMENSIONS = 1536
 
 

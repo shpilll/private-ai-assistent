@@ -23,7 +23,7 @@ services:
       <<: *database
       POSTGRES_HOST: db
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-      OPENROUTER_EMBEDDING_MODEL: ${OPENROUTER_EMBEDDING_MODEL:-nvidia/nemotron-3-embed-1b:free}
+      OPENROUTER_EMBEDDING_MODEL: ${OPENROUTER_EMBEDDING_MODEL:-nvidia/nemotron-3.5-embed-1b:free}
       OPENROUTER_CHAT_MODEL: ${OPENROUTER_CHAT_MODEL:-openrouter/free}
     depends_on:
       db:
